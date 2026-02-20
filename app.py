@@ -6,127 +6,6 @@ import streamlit as st
 QBER_THRESHOLD = 0.11
 
 
-def text_to_binary(text: str) -> str:
-    return "".join(format(ord(char), "08b") for char in text)
-
-
-def binary_to_text(binary: str) -> str:
-    chunks = [binary[i : i + 8] for i in range(0, len(binary), 8)]
-    return "".join(chr(int(chunk, 2)) for chunk in chunks if len(chunk) == 8)
-
-
-def xor_operation(data: str, key: str) -> str:
-    return "".join(str(int(data[i]) ^ int(key[i])) for i in range(len(data)))
-
-
-def bb84_round(num_bits: int, eve_present: bool):
-    alice_bits = np.random.randint(0, 2, num_bits)
-    alice_bases = np.random.randint(0, 2, num_bits)
-    bob_bases = np.random.randint(0, 2, num_bits)
-
-    running_errors = []
-    sifted_key = []
-    table_rows = []
-    errors = 0
-    sifted_count = 0
-
-    for idx in range(num_bits):
-        bit = int(alice_bits[idx])
-        basis = int(alice_bases[idx])
-
-        eve_basis = "-"
-        if eve_present:
-            eve_basis = random.randint(0, 1)
-            if eve_basis != basis:
-                bit = random.randint(0, 1)
-
-        if int(bob_bases[idx]) == basis:
-            measured_bit = bit
-            sifted_count += 1
-            sifted_key.append(measured_bit)
-
-            is_error = int(measured_bit != int(alice_bits[idx]))
-            errors += is_error
-            running_errors.append(is_error)
-            status = "ERROR" if is_error else "OK"
-        else:
-            measured_bit = random.randint(0, 1)
-            status = "DISCARDED"
-
-        if idx < 20:
-            table_rows.append(
-                {
-                    "Idx": idx + 1,
-                    "Alice Bit": int(alice_bits[idx]),
-                    "Alice Basis": basis,
-                    "Eve Basis": eve_basis,
-                    "Bob Basis": int(bob_bases[idx]),
-                    "Bob Bit": measured_bit,
-                    "Status": status,
-                }
-            )
-
-    qber = (errors / sifted_count) if sifted_count else 0.0
-    qber_curve = []
-    if running_errors:
-        cumulative = np.cumsum(running_errors)
-        trials = np.arange(1, len(cumulative) + 1)
-        qber_curve = (cumulative / trials).tolist()
-
-    return {
-        "sifted_key": "".join(map(str, sifted_key)),
-        "qber": qber,
-        "errors": errors,
-        "sifted_count": sifted_count,
-        "table_rows": table_rows,
-        "qber_curve": qber_curve,
-        "num_bits": num_bits,
-    }
-
-
-def generate_key_for_message(required_bits: int, eve_present: bool, multiplier: int):
-    collected_key = ""
-    total_bits_sent = 0
-    total_sifted = 0
-    total_errors = 0
-    last_rows = []
-    last_curve = []
-
-    max_rounds = 8
-    for _ in range(max_rounds):
-        num_bits = max(required_bits * multiplier, 64)
-        round_result = bb84_round(num_bits, eve_present)
-
-        collected_key += round_result["sifted_key"]
-        total_bits_sent += round_result["num_bits"]
-        total_sifted += round_result["sifted_count"]
-        total_errors += round_result["errors"]
-        last_rows = round_result["table_rows"]
-        last_curve = round_result["qber_curve"]
-
-        if len(collected_key) >= required_bits:
-            break
-
-    overall_qber = (total_errors / total_sifted) if total_sifted else 0.0
-    return {
-        "key": collected_key[:required_bits],
-        "qber": overall_qber,
-        "total_bits_sent": total_bits_sent,
-        "total_sifted": total_sifted,
-        "total_errors": total_errors,
-        "last_rows": last_rows,
-        "last_curve": last_curve,
-    }
-
-
-def qber_comparison(sample_bits: int):
-    secure = bb84_round(sample_bits, eve_present=False)["qber"]
-    attacked = bb84_round(sample_bits, eve_present=True)["qber"]
-    return secure, attacked
-
-
-# User-requested classic BB84 helper set
-
 def generate_bits(n):
     return np.random.randint(2, size=n)
 
@@ -147,246 +26,217 @@ def measure(bits, sender_bases, receiver_bases):
 
 def sift_key(sender_bases, receiver_bases, bits):
     sifted = []
+    indices = []
     for i in range(len(sender_bases)):
         if sender_bases[i] == receiver_bases[i]:
-            sifted.append(bits[i])
-    return np.array(sifted)
+            sifted.append(int(bits[i]))
+            indices.append(i + 1)
+    return np.array(sifted), indices
 
 
 def calculate_qber(key1, key2):
     errors = np.sum(key1 != key2)
-    return errors / len(key1) if len(key1) > 0 else 1
+    return errors / len(key1) if len(key1) > 0 else 1.0
 
 
-def xor_encrypt_decrypt(message, key):
-    binary_message = "".join(format(ord(c), "08b") for c in message)
-    key = "".join(map(str, key))
-
-    key = (key * (len(binary_message) // len(key) + 1))[: len(binary_message)]
-    encrypted = "".join(str(int(b) ^ int(k)) for b, k in zip(binary_message, key))
-
-    chars = []
-    for i in range(0, len(encrypted), 8):
-        byte = encrypted[i : i + 8]
-        chars.append(chr(int(byte, 2)))
-    return "".join(chars)
+def text_to_binary(text):
+    return "".join(format(ord(char), "08b") for char in text)
 
 
-st.set_page_config(page_title="BB84 Exhibition Demo", page_icon="B", layout="wide")
+def binary_to_text(binary):
+    chars = [binary[i : i + 8] for i in range(0, len(binary), 8)]
+    return "".join(chr(int(char, 2)) for char in chars if len(char) == 8)
+
+
+def xor_binary(data, key):
+    return "".join(str(int(data[i]) ^ int(key[i])) for i in range(len(data)))
+
+
+def run_intercept_resend_simulation(total_qubits):
+    alice_bits = generate_bits(total_qubits)
+    alice_bases = generate_bases(total_qubits)
+    eve_bases = generate_bases(total_qubits)
+    bob_bases = generate_bases(total_qubits)
+
+    eve_bits = measure(alice_bits, alice_bases, eve_bases)
+    bob_bits = measure(eve_bits, eve_bases, bob_bases)
+
+    alice_key, sifted_indices = sift_key(alice_bases, bob_bases, alice_bits)
+    bob_key, _ = sift_key(alice_bases, bob_bases, bob_bits)
+
+    qber = calculate_qber(alice_key, bob_key)
+
+    # Running QBER on sifted bits
+    running_errors = []
+    for i in range(len(alice_key)):
+        running_errors.append(int(alice_key[i] != bob_key[i]))
+
+    qber_curve = []
+    if running_errors:
+        cumulative = np.cumsum(running_errors)
+        trials = np.arange(1, len(cumulative) + 1)
+        qber_curve = (cumulative / trials).tolist()
+
+    sample_rows = []
+    for i in range(min(20, total_qubits)):
+        status = "Discarded"
+        if alice_bases[i] == bob_bases[i]:
+            status = "YES" if alice_bits[i] == bob_bits[i] else "ERROR"
+        sample_rows.append(
+            {
+                "Idx": i + 1,
+                "Alice Bit": int(alice_bits[i]),
+                "Alice Basis": alice_bases[i],
+                "Eve Basis": eve_bases[i],
+                "Bob Basis": bob_bases[i],
+                "Bob Bit": int(bob_bits[i]),
+                "Status": status,
+            }
+        )
+
+    return {
+        "qber": qber,
+        "sifted": len(alice_key),
+        "errors": int(np.sum(alice_key != bob_key)) if len(alice_key) > 0 else 0,
+        "qber_curve": qber_curve,
+        "sifted_indices": sifted_indices,
+        "sample_rows": sample_rows,
+    }
+
+
+def run_live_demo(message, eve_attack, n_bits):
+    alice_bits = generate_bits(n_bits)
+    alice_bases = generate_bases(n_bits)
+    bob_bases = generate_bases(n_bits)
+
+    if eve_attack:
+        eve_bases = generate_bases(n_bits)
+        eve_measure = measure(alice_bits, alice_bases, eve_bases)
+        bob_bits = measure(eve_measure, eve_bases, bob_bases)
+    else:
+        bob_bits = measure(alice_bits, alice_bases, bob_bases)
+
+    alice_key, _ = sift_key(alice_bases, bob_bases, alice_bits)
+    bob_key, _ = sift_key(alice_bases, bob_bases, bob_bits)
+
+    qber = calculate_qber(alice_key, bob_key)
+
+    if len(alice_key) == 0:
+        return {"qber": qber, "ok": False, "reason": "No sifted key generated."}
+
+    message_binary = text_to_binary(message)
+    key_binary = "".join(map(str, alice_key))
+    key_binary = (key_binary * (len(message_binary) // len(key_binary) + 1))[: len(message_binary)]
+
+    encrypted_binary = xor_binary(message_binary, key_binary)
+    decrypted_binary = xor_binary(encrypted_binary, key_binary)
+    decrypted_message = binary_to_text(decrypted_binary)
+
+    return {
+        "qber": qber,
+        "ok": qber < 0.2,
+        "encrypted_binary": encrypted_binary,
+        "decrypted_message": decrypted_message,
+        "alice_key_len": len(alice_key),
+    }
+
+
+st.set_page_config(page_title="Quantum Encryption Exhibition", page_icon="Q", layout="wide")
 
 st.markdown(
     """
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=DM+Serif+Display&display=swap');
-
+        <style>
     .stApp {
-        background:
-            radial-gradient(80rem 35rem at 10% -10%, #d5f5ec 0%, rgba(213,245,236,0) 60%),
-            radial-gradient(70rem 30rem at 90% -20%, #ffe7c6 0%, rgba(255,231,198,0) 60%),
-            linear-gradient(180deg, #f9f7f2 0%, #f4f1ea 100%);
-        color: #0f172a;
-        font-family: 'Manrope', sans-serif;
+      background:
+        radial-gradient(60rem 30rem at 10% -10%, rgba(34,197,94,0.18) 0%, rgba(34,197,94,0) 60%),
+        radial-gradient(70rem 35rem at 100% 0%, rgba(59,130,246,0.20) 0%, rgba(59,130,246,0) 60%),
+        linear-gradient(180deg, #020617 0%, #0b1120 50%, #020617 100%);
+      color: #dbeafe;
     }
-
-    .block-container {
-        max-width: 1150px;
-        padding-top: 2rem;
-        padding-bottom: 2.5rem;
+    .block-container { max-width: 1100px; }
+    h1, h2, h3 { color: #86efac; }
+    p, label, .stMarkdown, .stCaption { color: #bfdbfe !important; }
+    .stButton > button {
+      background: linear-gradient(90deg, #2563eb 0%, #22c55e 100%);
+      color: #ecfeff;
+      border: none;
+      border-radius: 10px;
+      font-weight: 700;
     }
-
-    .hero-tag {
-        display: inline-block;
-        background: #0f766e;
-        color: #ecfeff;
-        padding: 0.35rem 0.75rem;
-        border-radius: 999px;
-        font-size: 0.78rem;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        font-weight: 700;
-    }
-
-    .hero-title {
-        font-family: 'DM Serif Display', serif;
-        font-size: clamp(2rem, 5vw, 3.8rem);
-        margin: 0.8rem 0 0.35rem;
-        letter-spacing: -0.01em;
-        line-height: 1.03;
-    }
-
-    .hero-sub {
-        color: #475569;
-        max-width: 62ch;
-        margin-bottom: 1rem;
-        font-size: 1.02rem;
-    }
-
-    .card {
-        background: rgba(255, 255, 255, 0.75);
-        border: 1px solid #e5dfd4;
-        border-radius: 16px;
-        padding: 1rem 1.1rem;
-        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
-    }
-
-    .metric-title {
-        font-size: 0.82rem;
-        color: #64748b;
-        text-transform: uppercase;
-        letter-spacing: 0.07em;
-        margin-bottom: 0.35rem;
-    }
-
-    .metric-value {
-        font-size: 1.55rem;
-        font-weight: 800;
-        color: #0f172a;
+    .stMetric {
+      background: rgba(15, 23, 42, 0.7);
+      border: 1px solid rgba(59,130,246,0.35);
+      border-radius: 10px;
+      padding: 0.4rem;
     }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-st.markdown('<span class="hero-tag">Exhibition Demo</span>', unsafe_allow_html=True)
-st.markdown('<div class="hero-title">BB84 Quantum Secure Communication</div>', unsafe_allow_html=True)
-st.markdown(
-    '<div class="hero-sub">Interactive frontend for your project: simulate BB84 key exchange, detect eavesdropping via QBER, and encrypt/decrypt visitor messages live.</div>',
-    unsafe_allow_html=True,
-)
+st.title("Quantum Encryption Project - BB84")
+st.write("Clean exhibition app with two modes: full simulation and live message demo.")
 
-left, right = st.columns([1.25, 1])
+sim_tab, live_tab = st.tabs(["Simulation", "Live Demo"])
 
-with left:
-    st.subheader("Secure Transmission")
-    message = st.text_area(
-        "Message",
-        value="Welcome to our quantum security exhibition.",
-        height=120,
-        help="This message is converted to binary and protected with a BB84-generated key.",
-    )
+with sim_tab:
+    st.subheader("Intercept-Resend Simulation (First Model)")
+    total_qubits = st.slider("Total Qubits", 100, 2000, 350, step=50)
 
-    eve_present = st.toggle("Simulate Eve attack", value=False)
-    multiplier = st.slider("Key generation scale", min_value=2, max_value=6, value=4)
-
-    run_demo = st.button("Run BB84 Transmission", type="primary", use_container_width=True)
-
-with right:
-    st.subheader("Live Threshold")
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.write("Transmission is aborted if QBER exceeds 11%.")
-    st.progress(QBER_THRESHOLD)
-    st.write("Reference: secure channels should stay well below this threshold.")
-    st.markdown("</div>", unsafe_allow_html=True)
-
-if run_demo:
-    if not message.strip():
-        st.warning("Enter a message before running the transmission.")
-    else:
-        msg_binary = text_to_binary(message)
-        result = generate_key_for_message(len(msg_binary), eve_present, multiplier)
+    if st.button("Run Simulation", key="run_sim"):
+        result = run_intercept_resend_simulation(total_qubits)
 
         c1, c2, c3 = st.columns(3)
-        with c1:
-            st.markdown(
-                '<div class="card"><div class="metric-title">QBER</div><div class="metric-value">{:.2f}%</div></div>'.format(result["qber"] * 100),
-                unsafe_allow_html=True,
-            )
-        with c2:
-            st.markdown(
-                '<div class="card"><div class="metric-title">Sifted Bits</div><div class="metric-value">{}</div></div>'.format(result["total_sifted"]),
-                unsafe_allow_html=True,
-            )
-        with c3:
-            st.markdown(
-                '<div class="card"><div class="metric-title">Qubits Sent</div><div class="metric-value">{}</div></div>'.format(result["total_bits_sent"]),
-                unsafe_allow_html=True,
-            )
+        c1.metric("QBER", f"{result['qber']*100:.2f}%")
+        c2.metric("Sifted Key Length", result["sifted"])
+        c3.metric("Errors", result["errors"])
 
-        if result["qber"] > QBER_THRESHOLD:
-            st.error("Eavesdropping detected. Transmission aborted.")
-        elif len(result["key"]) < len(msg_binary):
-            st.error("Not enough sifted key bits generated. Increase key generation scale and rerun.")
+        fig, ax = plt.subplots(figsize=(9, 4.5))
+        if result["qber_curve"]:
+            ax.plot(result["sifted_indices"], result["qber_curve"], color="#22d3ee", linewidth=2, label="Simulated QBER")
+        ax.axhline(y=0.25, color="#ef4444", linestyle="--", linewidth=2, label="Theory (25%)")
+        ax.set_title("QBER During Intercept-Resend Attack")
+        ax.set_xlabel("Sifted Qubit Index")
+        ax.set_ylabel("QBER")
+        ax.set_ylim(0, 0.5)
+        ax.grid(alpha=0.3)
+        ax.legend()
+        st.pyplot(fig)
+        plt.close(fig)
+
+        st.dataframe(result["sample_rows"], use_container_width=True, hide_index=True)
+
+with live_tab:
+    st.subheader("Interactive Live Demo (Message Encryption + QBER)")
+    message = st.text_input("Enter Message", value="Welcome to our quantum exhibition")
+    eve_attack = st.checkbox("Simulate Eve Attack")
+    n_bits = st.slider("Transmission Bits", 100, 2000, 400, step=50)
+
+    if st.button("Start Secure Transmission", key="run_live"):
+        if not message.strip():
+            st.warning("Please enter a message.")
         else:
-            encrypted_binary = xor_operation(msg_binary, result["key"])
-            decrypted_binary = xor_operation(encrypted_binary, result["key"])
-            decrypted_message = binary_to_text(decrypted_binary)
+            output = run_live_demo(message, eve_attack, n_bits)
 
-            st.success("Transmission successful. Message encrypted and recovered.")
-            st.code(encrypted_binary[:320] + ("..." if len(encrypted_binary) > 320 else ""), language="text")
-            st.write("Decrypted message:")
-            st.info(decrypted_message)
+            fig2, ax2 = plt.subplots(figsize=(5, 3))
+            ax2.bar(["QBER"], [output["qber"]], color="#38bdf8")
+            ax2.axhline(y=QBER_THRESHOLD, color="#f59e0b", linestyle="--", label="11% Threshold")
+            ax2.set_ylim(0, 1)
+            ax2.set_ylabel("QBER")
+            ax2.legend()
+            st.pyplot(fig2)
+            plt.close(fig2)
 
-        st.subheader("QBER Convergence (last round)")
-        if result["last_curve"]:
-            st.line_chart(result["last_curve"])
-        else:
-            st.write("No sifted bits in the last round.")
+            st.write(f"QBER: {output['qber']:.3f}")
 
-        st.subheader("Sample Measurement Table (first 20 qubits)")
-        st.dataframe(result["last_rows"], use_container_width=True, hide_index=True)
+            if not output["ok"]:
+                st.error("Possible eavesdropping detected or insecure channel. Transmission aborted.")
+                if "reason" in output:
+                    st.caption(output["reason"])
+            else:
+                st.success("Secure channel established.")
+                st.code(output["encrypted_binary"][:400] + ("..." if len(output["encrypted_binary"]) > 400 else ""))
+                st.write("Decrypted Message:")
+                st.info(output["decrypted_message"])
+                st.caption(f"Sifted key length: {output['alice_key_len']} bits")
 
-st.divider()
-st.subheader("Attack Impact Snapshot")
-comparison_bits = st.slider("Comparison qubits", min_value=100, max_value=2000, value=600, step=100)
-if st.button("Compare secure vs attack", use_container_width=True):
-    secure_qber, attacked_qber = qber_comparison(comparison_bits)
-    st.bar_chart(
-        {
-            "QBER": {
-                "Secure Channel": secure_qber,
-                "With Eve Attack": attacked_qber,
-            }
-        }
-    )
-    st.write(f"Secure QBER: {secure_qber*100:.2f}% | Attack QBER: {attacked_qber*100:.2f}%")
-
-st.divider()
-st.subheader("Classic BB84 Flow")
-st.write("Direct version of your requested simulation + encryption flow.")
-
-classic_message = st.text_input("Enter Message to Send", key="classic_message")
-classic_eve_attack = st.checkbox("Simulate Eavesdropping (Eve Attack)", key="classic_eve")
-
-if st.button("Start Secure Transmission", key="classic_start"):
-    n = 100
-
-    alice_bits = generate_bits(n)
-    alice_bases = generate_bases(n)
-    bob_bases = generate_bases(n)
-
-    if classic_eve_attack:
-        eve_bases = generate_bases(n)
-        eve_measure = measure(alice_bits, alice_bases, eve_bases)
-        bob_bits = measure(eve_measure, eve_bases, bob_bases)
-    else:
-        bob_bits = measure(alice_bits, alice_bases, bob_bases)
-
-    alice_key = sift_key(alice_bases, bob_bases, alice_bits)
-    bob_key = sift_key(alice_bases, bob_bases, bob_bits)
-
-    qber = calculate_qber(alice_key, bob_key)
-
-    st.subheader("Quantum Bit Error Rate (QBER)")
-    st.write(f"QBER: {round(qber, 3)}")
-
-    fig, ax = plt.subplots()
-    ax.bar(["QBER"], [qber])
-    ax.set_ylim(0, 1)
-    st.pyplot(fig)
-    plt.close(fig)
-
-    if qber < 0.2 and len(alice_key) > 0:
-        st.success("Secure Channel Established!")
-
-        encrypted = xor_encrypt_decrypt(classic_message, alice_key)
-        decrypted = xor_encrypt_decrypt(encrypted, bob_key)
-
-        st.subheader("Encrypted Message")
-        st.code(encrypted)
-
-        st.subheader("Decrypted Message")
-        st.code(decrypted)
-    else:
-        st.error("Possible Eavesdropping Detected! Transmission Aborted.")
-
-st.caption("Built for exhibition demo: BB84 simulation + message encryption workflow in one Streamlit frontend.")
