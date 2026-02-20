@@ -1,4 +1,5 @@
 ﻿import random
+import matplotlib.pyplot as plt
 import numpy as np
 import streamlit as st
 
@@ -23,7 +24,6 @@ def bb84_round(num_bits: int, eve_present: bool):
     alice_bases = np.random.randint(0, 2, num_bits)
     bob_bases = np.random.randint(0, 2, num_bits)
 
-    bob_results = []
     running_errors = []
     sifted_key = []
     table_rows = []
@@ -52,8 +52,6 @@ def bb84_round(num_bits: int, eve_present: bool):
         else:
             measured_bit = random.randint(0, 1)
             status = "DISCARDED"
-
-        bob_results.append(measured_bit)
 
         if idx < 20:
             table_rows.append(
@@ -125,6 +123,53 @@ def qber_comparison(sample_bits: int):
     secure = bb84_round(sample_bits, eve_present=False)["qber"]
     attacked = bb84_round(sample_bits, eve_present=True)["qber"]
     return secure, attacked
+
+
+# User-requested classic BB84 helper set
+
+def generate_bits(n):
+    return np.random.randint(2, size=n)
+
+
+def generate_bases(n):
+    return np.random.choice(["Z", "X"], size=n)
+
+
+def measure(bits, sender_bases, receiver_bases):
+    result = []
+    for i in range(len(bits)):
+        if sender_bases[i] == receiver_bases[i]:
+            result.append(bits[i])
+        else:
+            result.append(random.randint(0, 1))
+    return np.array(result)
+
+
+def sift_key(sender_bases, receiver_bases, bits):
+    sifted = []
+    for i in range(len(sender_bases)):
+        if sender_bases[i] == receiver_bases[i]:
+            sifted.append(bits[i])
+    return np.array(sifted)
+
+
+def calculate_qber(key1, key2):
+    errors = np.sum(key1 != key2)
+    return errors / len(key1) if len(key1) > 0 else 1
+
+
+def xor_encrypt_decrypt(message, key):
+    binary_message = "".join(format(ord(c), "08b") for c in message)
+    key = "".join(map(str, key))
+
+    key = (key * (len(binary_message) // len(key) + 1))[: len(binary_message)]
+    encrypted = "".join(str(int(b) ^ int(k)) for b, k in zip(binary_message, key))
+
+    chars = []
+    for i in range(0, len(encrypted), 8):
+        byte = encrypted[i : i + 8]
+        chars.append(chr(int(byte, 2)))
+    return "".join(chars)
 
 
 st.set_page_config(page_title="BB84 Exhibition Demo", page_icon="B", layout="wide")
@@ -231,7 +276,7 @@ with right:
     st.write("Transmission is aborted if QBER exceeds 11%.")
     st.progress(QBER_THRESHOLD)
     st.write("Reference: secure channels should stay well below this threshold.")
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
 if run_demo:
     if not message.strip():
@@ -242,11 +287,20 @@ if run_demo:
 
         c1, c2, c3 = st.columns(3)
         with c1:
-            st.markdown('<div class="card"><div class="metric-title">QBER</div><div class="metric-value">{:.2f}%</div></div>'.format(result["qber"] * 100), unsafe_allow_html=True)
+            st.markdown(
+                '<div class="card"><div class="metric-title">QBER</div><div class="metric-value">{:.2f}%</div></div>'.format(result["qber"] * 100),
+                unsafe_allow_html=True,
+            )
         with c2:
-            st.markdown('<div class="card"><div class="metric-title">Sifted Bits</div><div class="metric-value">{}</div></div>'.format(result["total_sifted"]), unsafe_allow_html=True)
+            st.markdown(
+                '<div class="card"><div class="metric-title">Sifted Bits</div><div class="metric-value">{}</div></div>'.format(result["total_sifted"]),
+                unsafe_allow_html=True,
+            )
         with c3:
-            st.markdown('<div class="card"><div class="metric-title">Qubits Sent</div><div class="metric-value">{}</div></div>'.format(result["total_bits_sent"]), unsafe_allow_html=True)
+            st.markdown(
+                '<div class="card"><div class="metric-title">Qubits Sent</div><div class="metric-value">{}</div></div>'.format(result["total_bits_sent"]),
+                unsafe_allow_html=True,
+            )
 
         if result["qber"] > QBER_THRESHOLD:
             st.error("Eavesdropping detected. Transmission aborted.")
@@ -284,8 +338,55 @@ if st.button("Compare secure vs attack", use_container_width=True):
             }
         }
     )
-    st.write(
-        f"Secure QBER: {secure_qber*100:.2f}% | Attack QBER: {attacked_qber*100:.2f}%"
-    )
+    st.write(f"Secure QBER: {secure_qber*100:.2f}% | Attack QBER: {attacked_qber*100:.2f}%")
+
+st.divider()
+st.subheader("Classic BB84 Flow")
+st.write("Direct version of your requested simulation + encryption flow.")
+
+classic_message = st.text_input("Enter Message to Send", key="classic_message")
+classic_eve_attack = st.checkbox("Simulate Eavesdropping (Eve Attack)", key="classic_eve")
+
+if st.button("Start Secure Transmission", key="classic_start"):
+    n = 100
+
+    alice_bits = generate_bits(n)
+    alice_bases = generate_bases(n)
+    bob_bases = generate_bases(n)
+
+    if classic_eve_attack:
+        eve_bases = generate_bases(n)
+        eve_measure = measure(alice_bits, alice_bases, eve_bases)
+        bob_bits = measure(eve_measure, eve_bases, bob_bases)
+    else:
+        bob_bits = measure(alice_bits, alice_bases, bob_bases)
+
+    alice_key = sift_key(alice_bases, bob_bases, alice_bits)
+    bob_key = sift_key(alice_bases, bob_bases, bob_bits)
+
+    qber = calculate_qber(alice_key, bob_key)
+
+    st.subheader("Quantum Bit Error Rate (QBER)")
+    st.write(f"QBER: {round(qber, 3)}")
+
+    fig, ax = plt.subplots()
+    ax.bar(["QBER"], [qber])
+    ax.set_ylim(0, 1)
+    st.pyplot(fig)
+    plt.close(fig)
+
+    if qber < 0.2 and len(alice_key) > 0:
+        st.success("Secure Channel Established!")
+
+        encrypted = xor_encrypt_decrypt(classic_message, alice_key)
+        decrypted = xor_encrypt_decrypt(encrypted, bob_key)
+
+        st.subheader("Encrypted Message")
+        st.code(encrypted)
+
+        st.subheader("Decrypted Message")
+        st.code(decrypted)
+    else:
+        st.error("Possible Eavesdropping Detected! Transmission Aborted.")
 
 st.caption("Built for exhibition demo: BB84 simulation + message encryption workflow in one Streamlit frontend.")
