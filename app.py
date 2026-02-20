@@ -253,4 +253,4 @@ if st.button("Send Inquiry"):
     else:
         st.warning("Please fill in all fields before submitting.")
 
-st.markdown('<div class="footer">Exhibit Nova 2026 • Built with Streamlit • Ready for GitHub deployment</div>', unsafe_allow_html=True)
+st.markdown('<div class="footer">Exhibit Nova 2026 â€¢ Built with Streamlit â€¢ Ready for GitHub deployment</div>', unsafe_allow_html=True)
